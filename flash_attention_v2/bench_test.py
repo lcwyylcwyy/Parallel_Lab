@@ -10,14 +10,14 @@ os.environ['TORCH_CUDA_ARCH_LIST'] = 'Ampere'
 os.environ['MAX_JOBS'] = '10'
 # extra_compile_args['nvcc'] = ['-g', '-G']
 # Load the CUDA kernel as a python module
-minimal_attn = load(name='minimal_attn', sources=['fattn.cpp', 'flash.cu'], verbose=True, extra_cuda_cflags=['-O2'])
+minimal_attn = load(name='minimal_attn', sources=['fattn.cpp', 'flash.cu'], verbose=True, extra_cuda_cflags=['-O3'])
 torch.manual_seed(0)
 
-# 如果使用CUDA，还需要设置CUDA的随机数种子
+# set CUDA seeds
 torch.cuda.manual_seed(0)
-torch.cuda.manual_seed_all(0)  # 如果使用多个GPU
+torch.cuda.manual_seed_all(0)  # multi-GPU
 
-# 确保在使用随机数时的可重复性
+# make sure the random number's repeatability
 torch.backends.cudnn.deterministic = True
 torch.backends.cudnn.benchmark = False
 

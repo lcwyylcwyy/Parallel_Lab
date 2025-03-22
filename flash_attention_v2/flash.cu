@@ -90,7 +90,7 @@ void flash_attention_v2_kernel(const float* Q, const float* K, const float* V, c
     int bx = blockIdx.x; int by = blockIdx.y;  // batch and head index
     // Offset into Q,K,V,O,l,m - different for each batch and head
     int qkv_offset = (bx * gridDim.y * N * d) + (by * N * d);  // gridDim.y = nh
-    int lm_offset = (bx * gridDim.y * N) + (by * N);  // offset for l and m
+    // int lm_offset = (bx * gridDim.y * N) + (by * N);  // offset for l and m
 
     // Define SRAM for Q,K,V,S
     extern __shared__ float sram[];
@@ -102,9 +102,10 @@ void flash_attention_v2_kernel(const float* Q, const float* K, const float* V, c
     float* S = &sram[tile_size_q + tile_size_kv * 2];
 
     for (int i = 0; i < Tr; i++) {
+        int row_offset = qkv_offset + (tile_size_q * i) + (tx * d);
         // Load Qi to SRAM registers
         for (int x = 0; x < d; x++) {
-            Qi[(tx * d) + x] = Q[qkv_offset + (tile_size_q * i) + (tx * d) + x];
+            Qi[(tx * d) + x] = Q[row_offset + x];
             // printf("Qi: %f, tx: %d, (tx * d) + x: %d\n", Qi[(tx * d) + x], tx, (tx * d) + x);
         }
         float row_m_prev = -INFINITY;
@@ -164,9 +165,9 @@ void flash_attention_v2_kernel(const float* Q, const float* K, const float* V, c
 //                if (tx==0 || tx==1) {
 //                    printf("pv: %f, tx: %d. \n", pv, tx);
 //                }
-                O[qkv_offset + (tile_size_q * i) + (tx * d) + x] =
+                O[row_offset + x] =
                         ((__expf(row_m_prev - row_m_new) *
-                        O[qkv_offset + (tile_size_q * i) + (tx * d) + x]) +
+                        O[row_offset + x]) +
                         pv);
             }
             row_m_prev = row_m_new;
@@ -174,7 +175,7 @@ void flash_attention_v2_kernel(const float* Q, const float* K, const float* V, c
 
         __syncthreads();  // otherwise, thread can use the wrong Kj, Vj in inner loop
         for (int x = 0; x < d; x++) {
-            O[qkv_offset + (tile_size_q * i) + (tx * d) + x] /= row_l;
+            O[row_offset + x] /= row_l;
         }
     }
 }
