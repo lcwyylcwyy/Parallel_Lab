@@ -24,10 +24,10 @@ torch.backends.cudnn.benchmark = False
 from torch import Tensor
 
 # Use small model params, otherwise slower than manual attention. See caveats in README.
-batch_size = 16
+batch_size = 1024
 n_head = 12
-seq_len = 96
-head_embd = 32
+seq_len = 192
+head_embd = 64
 
 softmax_scale = 1.0 / math.sqrt(head_embd)
 # batch_size = 1
@@ -92,6 +92,7 @@ def fa2_python(Q:Tensor, K:Tensor, V:Tensor) -> Tensor:
 fa2_output = fa2_python(q, k, v)
 # print("fa2_output output")
 # print(fa2_output)
+print('=== profiling spda attention ===')
 with torch.autograd.profiler.profile(use_device = 'cuda') as prof:
     spda_output = spda(q, k, v)
 print(prof.key_averages().table(sort_by='cuda_time_total', row_limit=10))
