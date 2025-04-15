@@ -151,7 +151,7 @@ def pytorch_swiglu(x, dim=-1):
 
 def validate_activations():
     # Create input data
-    x = np.linspace(-5, 5, 1000)
+    x = np.linspace(-10, 10, 1000)
 
     # Dictionary to hold functions and their PyTorch equivalents
     functions = {
