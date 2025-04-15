@@ -6,7 +6,7 @@ from utils import set_torch_random_seed
 
 set_torch_random_seed()
 
-class Qwen2RMSNorm(nn.Module):
+class RMSNorm(nn.Module):
     def __init__(self, hidden_size, eps=1e-6):
         """
         Qwen2RMSNorm is equivalent to T5LayerNorm
