@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, datasets, transforms
 import copy
-from numpy_optimizers import SGD, SGDM, Adagrad, RMSProp, Adadelta, Adam, AdamW, Adafactor
+from numpy_optimizers import SGD, SGDM, SGDM_Nesterov, Adagrad, RMSProp, Adadelta, Adam, AdamW, Adafactor
 
 def load_mnist():
     """Load a batch of MNIST data"""
@@ -64,6 +64,7 @@ def create_numpy_optimizers(numpy_params):
     numpy_optimizers = {
         'SGD': SGD(copy.deepcopy(numpy_params), lr=0.01),
         'SGDM': SGDM(copy.deepcopy(numpy_params), lr=0.01, momentum=0.9),
+        'SGDM_Nesterov': SGDM_Nesterov(copy.deepcopy(numpy_params), lr=0.01, momentum=0.9),
         'Adagrad': Adagrad(copy.deepcopy(numpy_params), lr=0.01),
         'RMSProp': RMSProp(copy.deepcopy(numpy_params), lr=0.01, alpha=0.99),
         'Adadelta': Adadelta(copy.deepcopy(numpy_params), rho=0.9),
@@ -78,6 +79,7 @@ def create_pytorch_optimizers(model):
     pytorch_optimizers = {
         'SGD': optim.SGD(model.parameters(), lr=0.01),
         'SGDM': optim.SGD(model.parameters(), lr=0.01, momentum=0.9),
+        'SGDM_Nesterov': optim.SGD(model.parameters(), lr=0.01, momentum=0.9, nesterov=True, dampening=0.0),
         'Adagrad': optim.Adagrad(model.parameters(), lr=0.01),
         'RMSProp': optim.RMSprop(model.parameters(), lr=0.01, alpha=0.99),
         'Adadelta': optim.Adadelta(model.parameters(), rho=0.9),
@@ -96,7 +98,7 @@ def create_pytorch_optimizers(model):
     
     return pytorch_optimizers
 
-def validate_optimizers():
+def validate_optimizers(iterations=2):
     """Validate NumPy optimizers against PyTorch implementations for 2 epochs"""
     print("Loading MNIST data...")
     data, target = load_mnist()
@@ -104,7 +106,7 @@ def validate_optimizers():
     # Results dictionary: optimizer -> list of avg diffs per epoch
     results = {}
     
-    optimizer_names = ['SGD', 'SGDM', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW', ] # 'Adafactor'
+    optimizer_names = ['SGD', 'SGDM', 'SGDM_Nesterov', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW', ] # 'Adafactor'
     
     for optimizer_name in optimizer_names:
         print(f"\nValidating {optimizer_name}...")
@@ -129,7 +131,7 @@ def validate_optimizers():
         numpy_opt = numpy_optimizers[optimizer_name]
         
         epoch_diffs = []
-        for epoch in range(10):
+        for epoch in range(iterations):
             # Train for one epoch on a single batch
             torch_model.train()
             pytorch_opt.zero_grad()

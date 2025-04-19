@@ -33,22 +33,34 @@ class SGDM:
     def zero_grad(self):
         pass
 
-# class Adagrad:
-#     """Adagrad optimizer implemented in NumPy"""
-#     def __init__(self, params, lr=0.01, eps=1e-8):
-#         self.params = params
-#         self.lr = lr
-#         self.eps = eps
-#         self.square_grads = [np.zeros_like(param) for param in params]
-        
-#     def step(self, grads):
-#         """Performs a single optimization step."""
-#         for param_idx, param in enumerate(self.params):
-#             self.square_grads[param_idx] += np.square(grads[param_idx])
-#             param -= self.lr * grads[param_idx] / (np.sqrt(self.square_grads[param_idx]) + self.eps)
-            
-#     def zero_grad(self):
-#         pass
+class SGDM_Nesterov:
+    """SGD with Nesterov Momentum implemented in NumPy"""
+    def __init__(self, params, lr=0.01, momentum=0.9):
+        self.params = params
+        self.lr = lr
+        self.momentum = momentum
+        self.velocity = [np.zeros_like(param) for param in params]
+
+    def step(self, grads):
+        """Performs a single optimization step with Nesterov momentum."""
+        for param_idx, param in enumerate(self.params):
+            # paper implementation
+            # prev_velocity = self.velocity[param_idx].copy()
+            # self.velocity[param_idx] = self.momentum * self.velocity[param_idx] + grads[param_idx]
+            # nesterov_update = self.momentum * prev_velocity + grads[param_idx]
+            # param -= self.lr * nesterov_update
+
+            # pytorch implementation
+            # Update velocity
+            self.velocity[param_idx] = self.momentum * self.velocity[param_idx] + grads[param_idx]
+            # Calculate effective gradient with Nesterov momentum (matches PyTorch implementation)
+            effective_grad = grads[param_idx] + self.momentum * self.velocity[param_idx]
+            # Update parameter
+            param -= self.lr * effective_grad
+
+
+    def zero_grad(self):
+        pass
 
 class Adagrad:
     """Adagrad optimizer implemented in NumPy"""
