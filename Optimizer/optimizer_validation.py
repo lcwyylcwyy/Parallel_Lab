@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, datasets, transforms
 import copy
+
 from numpy_optimizers import SGD, SGDM, SGDM_Nesterov, Adagrad, RMSProp, Adadelta, Adam, AdamW, Adafactor
 
 def load_mnist():
@@ -84,7 +85,7 @@ def create_pytorch_optimizers(model):
         'RMSProp': optim.RMSprop(model.parameters(), lr=0.01, alpha=0.99),
         'Adadelta': optim.Adadelta(model.parameters(), rho=0.9),
         'Adam': optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999)),
-        'AdamW': optim.AdamW(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01)
+        'AdamW': optim.AdamW(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01),
     }
     
     try:
@@ -98,7 +99,7 @@ def create_pytorch_optimizers(model):
     
     return pytorch_optimizers
 
-def validate_optimizers(iterations=2):
+def validate_optimizers(iterations=3):
     """Validate NumPy optimizers against PyTorch implementations for 2 epochs"""
     print("Loading MNIST data...")
     data, target = load_mnist()
@@ -106,7 +107,7 @@ def validate_optimizers(iterations=2):
     # Results dictionary: optimizer -> list of avg diffs per epoch
     results = {}
     
-    optimizer_names = ['SGD', 'SGDM', 'SGDM_Nesterov', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW', ] # 'Adafactor'
+    optimizer_names = [ 'SGD', 'SGDM', 'SGDM_Nesterov', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW'] # 'Adafactor'
     
     for optimizer_name in optimizer_names:
         print(f"\nValidating {optimizer_name}...")
