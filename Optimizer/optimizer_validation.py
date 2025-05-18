@@ -71,7 +71,19 @@ def create_numpy_optimizers(numpy_params):
         'Adadelta': Adadelta(copy.deepcopy(numpy_params), rho=0.9),
         'Adam': Adam(copy.deepcopy(numpy_params), lr=0.001, betas=(0.9, 0.999)),
         'AdamW': AdamW(copy.deepcopy(numpy_params), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01),
-        'Adafactor': Adafactor(copy.deepcopy(numpy_params), relative_step=False, lr=0.001)
+        # Match exact settings of Transformers Adafactor
+        'Adafactor': Adafactor(
+            copy.deepcopy(numpy_params), 
+            relative_step=False, 
+            lr=0.001,
+            eps1=1e-30,
+            eps2=1e-3,
+            clip_threshold=1.0,
+            decay_rate=0.8,  # Transformers uses positive value
+            beta1=0.9,
+            weight_decay=0.0,
+            scale_parameter=False
+        )
     }
     return numpy_optimizers
 
@@ -91,15 +103,25 @@ def create_pytorch_optimizers(model):
     try:
         # Import Adafactor if available from transformers
         from transformers.optimization import Adafactor as TransformersAdafactor
+        # Create with exact same parameters as our NumPy version, but with correct parameter names
+        # In Transformers, eps must be a tuple/list, not a float
         pytorch_optimizers['Adafactor'] = TransformersAdafactor(
-            model.parameters(), relative_step=False, lr=0.001
+            model.parameters(), 
+            relative_step=False, 
+            lr=0.001,
+            eps=(1e-30,),  # Pass as a tuple with one element
+            clip_threshold=1.0,
+            decay_rate=0.8,
+            beta1=0.9,
+            weight_decay=0.0,
+            scale_parameter=False
         )
     except ImportError:
         print("Transformers library not available, skipping Adafactor PyTorch comparison")
     
     return pytorch_optimizers
 
-def validate_optimizers(iterations=3):
+def validate_optimizers(iterations=10):
     """Validate NumPy optimizers against PyTorch implementations for 2 epochs"""
     print("Loading MNIST data...")
     data, target = load_mnist()
@@ -108,6 +130,7 @@ def validate_optimizers(iterations=3):
     results = {}
     
     optimizer_names = [ 'SGD', 'SGDM', 'SGDM_Nesterov', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW'] # 'Adafactor'
+    # optimizer_names = [ 'Adafactor'] # 'Adafactor'
     
     for optimizer_name in optimizer_names:
         print(f"\nValidating {optimizer_name}...")
