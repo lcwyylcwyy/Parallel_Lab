@@ -4,7 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, datasets, transforms
 import copy
-from numpy_optimizers import SGD, SGDM, Adagrad, RMSProp, Adadelta, Adam, AdamW, Adafactor
+
+from numpy_optimizers import SGD, SGDM, SGDM_Nesterov, Adagrad, RMSProp, Adadelta, Adam, AdamW, Adafactor
 
 def load_mnist():
     """Load a batch of MNIST data"""
@@ -64,12 +65,25 @@ def create_numpy_optimizers(numpy_params):
     numpy_optimizers = {
         'SGD': SGD(copy.deepcopy(numpy_params), lr=0.01),
         'SGDM': SGDM(copy.deepcopy(numpy_params), lr=0.01, momentum=0.9),
+        'SGDM_Nesterov': SGDM_Nesterov(copy.deepcopy(numpy_params), lr=0.01, momentum=0.9),
         'Adagrad': Adagrad(copy.deepcopy(numpy_params), lr=0.01),
         'RMSProp': RMSProp(copy.deepcopy(numpy_params), lr=0.01, alpha=0.99),
         'Adadelta': Adadelta(copy.deepcopy(numpy_params), rho=0.9),
         'Adam': Adam(copy.deepcopy(numpy_params), lr=0.001, betas=(0.9, 0.999)),
         'AdamW': AdamW(copy.deepcopy(numpy_params), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01),
-        'Adafactor': Adafactor(copy.deepcopy(numpy_params), relative_step=False, lr=0.001)
+        # Match exact settings of Transformers Adafactor
+        'Adafactor': Adafactor(
+            copy.deepcopy(numpy_params), 
+            relative_step=False, 
+            lr=0.001,
+            eps1=1e-30,
+            eps2=1e-3,
+            clip_threshold=1.0,
+            decay_rate=0.8,  # Transformers uses positive value
+            beta1=0.9,
+            weight_decay=0.0,
+            scale_parameter=False
+        )
     }
     return numpy_optimizers
 
@@ -78,25 +92,36 @@ def create_pytorch_optimizers(model):
     pytorch_optimizers = {
         'SGD': optim.SGD(model.parameters(), lr=0.01),
         'SGDM': optim.SGD(model.parameters(), lr=0.01, momentum=0.9),
+        'SGDM_Nesterov': optim.SGD(model.parameters(), lr=0.01, momentum=0.9, nesterov=True, dampening=0.0),
         'Adagrad': optim.Adagrad(model.parameters(), lr=0.01),
         'RMSProp': optim.RMSprop(model.parameters(), lr=0.01, alpha=0.99),
         'Adadelta': optim.Adadelta(model.parameters(), rho=0.9),
         'Adam': optim.Adam(model.parameters(), lr=0.001, betas=(0.9, 0.999)),
-        'AdamW': optim.AdamW(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01)
+        'AdamW': optim.AdamW(model.parameters(), lr=0.001, betas=(0.9, 0.999), weight_decay=0.01),
     }
     
     try:
         # Import Adafactor if available from transformers
         from transformers.optimization import Adafactor as TransformersAdafactor
+        # Create with exact same parameters as our NumPy version, but with correct parameter names
+        # In Transformers, eps must be a tuple/list, not a float
         pytorch_optimizers['Adafactor'] = TransformersAdafactor(
-            model.parameters(), relative_step=False, lr=0.001
+            model.parameters(), 
+            relative_step=False, 
+            lr=0.001,
+            eps=(1e-30,),  # Pass as a tuple with one element
+            clip_threshold=1.0,
+            decay_rate=0.8,
+            beta1=0.9,
+            weight_decay=0.0,
+            scale_parameter=False
         )
     except ImportError:
         print("Transformers library not available, skipping Adafactor PyTorch comparison")
     
     return pytorch_optimizers
 
-def validate_optimizers():
+def validate_optimizers(iterations=10):
     """Validate NumPy optimizers against PyTorch implementations for 2 epochs"""
     print("Loading MNIST data...")
     data, target = load_mnist()
@@ -104,7 +129,8 @@ def validate_optimizers():
     # Results dictionary: optimizer -> list of avg diffs per epoch
     results = {}
     
-    optimizer_names = ['SGD', 'SGDM', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW', ] # 'Adafactor'
+    optimizer_names = [ 'SGD', 'SGDM', 'SGDM_Nesterov', 'Adagrad', 'RMSProp', 'Adadelta', 'Adam', 'AdamW'] # 'Adafactor'
+    # optimizer_names = [ 'Adafactor'] # 'Adafactor'
     
     for optimizer_name in optimizer_names:
         print(f"\nValidating {optimizer_name}...")
@@ -129,7 +155,7 @@ def validate_optimizers():
         numpy_opt = numpy_optimizers[optimizer_name]
         
         epoch_diffs = []
-        for epoch in range(10):
+        for epoch in range(iterations):
             # Train for one epoch on a single batch
             torch_model.train()
             pytorch_opt.zero_grad()

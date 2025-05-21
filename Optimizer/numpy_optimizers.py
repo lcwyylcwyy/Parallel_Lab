@@ -33,22 +33,34 @@ class SGDM:
     def zero_grad(self):
         pass
 
-# class Adagrad:
-#     """Adagrad optimizer implemented in NumPy"""
-#     def __init__(self, params, lr=0.01, eps=1e-8):
-#         self.params = params
-#         self.lr = lr
-#         self.eps = eps
-#         self.square_grads = [np.zeros_like(param) for param in params]
-        
-#     def step(self, grads):
-#         """Performs a single optimization step."""
-#         for param_idx, param in enumerate(self.params):
-#             self.square_grads[param_idx] += np.square(grads[param_idx])
-#             param -= self.lr * grads[param_idx] / (np.sqrt(self.square_grads[param_idx]) + self.eps)
-            
-#     def zero_grad(self):
-#         pass
+class SGDM_Nesterov:
+    """SGD with Nesterov Momentum implemented in NumPy"""
+    def __init__(self, params, lr=0.01, momentum=0.9):
+        self.params = params
+        self.lr = lr
+        self.momentum = momentum
+        self.velocity = [np.zeros_like(param) for param in params]
+
+    def step(self, grads):
+        """Performs a single optimization step with Nesterov momentum."""
+        for param_idx, param in enumerate(self.params):
+            # paper implementation
+            # prev_velocity = self.velocity[param_idx].copy()
+            # self.velocity[param_idx] = self.momentum * self.velocity[param_idx] + grads[param_idx]
+            # nesterov_update = self.momentum * prev_velocity + grads[param_idx]
+            # param -= self.lr * nesterov_update
+
+            # pytorch implementation
+            # Update velocity
+            self.velocity[param_idx] = self.momentum * self.velocity[param_idx] + grads[param_idx]
+            # Calculate effective gradient with Nesterov momentum (matches PyTorch implementation)
+            effective_grad = grads[param_idx] + self.momentum * self.velocity[param_idx]
+            # Update parameter
+            param -= self.lr * effective_grad
+
+
+    def zero_grad(self):
+        pass
 
 class Adagrad:
     """Adagrad optimizer implemented in NumPy"""
@@ -182,114 +194,184 @@ class AdamW:
         pass
 
 class Adafactor:
-    """Adafactor optimizer implemented in NumPy"""
-    def __init__(self, params, lr=None, eps=(1e-30, 1e-3), clip_threshold=1.0, 
-                 decay_rate=-0.8, beta1=None, weight_decay=0.0, scale_parameter=True, 
-                 relative_step=True, warmup_init=False):
+    """
+    Adafactor optimizer implemented in NumPy
+    
+    Based on:
+    "Adafactor: Adaptive Learning Rates with Sublinear Memory Cost"
+    https://arxiv.org/abs/1804.04235
+    """
+    def __init__(self, params, lr=None, eps1=1e-30, eps2=1e-3, 
+                 clip_threshold=1.0, decay_rate=0.8, beta1=0.0,
+                 weight_decay=0.0, relative_step=True, scale_parameter=True,
+                 warmup_init=False):
+        # Store parameters
         self.params = params
-        self.eps = eps
+        self.lr = lr
+        self.eps1 = eps1  # For stability in denominator
+        self.eps2 = eps2  # Minimum learning rate
         self.clip_threshold = clip_threshold
         self.decay_rate = decay_rate
         self.beta1 = beta1
         self.weight_decay = weight_decay
-        self.scale_parameter = scale_parameter
         self.relative_step = relative_step
+        self.scale_parameter = scale_parameter
         self.warmup_init = warmup_init
-        self.lr = lr
         
+        # Initialize optimizer state
         self.step_count = 0
-        self.factored = []
-        self.v_row = []
-        self.v_col = []
-        self.v = []
-        self.m = []
+        self.m = [None] * len(params)  # First moment if beta1 > 0
+        self.v_row = [None] * len(params)  # Factored 2nd moment (rows)
+        self.v_col = [None] * len(params)  # Factored 2nd moment (columns)
         
-        for param in params:
-            # Determine if we can use factored second moment
-            factored = len(param.shape) >= 2
-            self.factored.append(factored)
-            
-            if factored:
-                # For factored parameters, initialize row and column factors
-                self.v_row.append(np.zeros(param.shape[0]))
-                self.v_col.append(np.zeros(param.shape[1]))
-                self.v.append(None)  # No full v needed for factored params
-            else:
-                # For non-factored parameters, initialize full v
-                self.v_row.append(None)
-                self.v_col.append(None)
-                self.v.append(np.zeros_like(param))
-                
-            # Initialize momentum if beta1 is not None
-            self.m.append(np.zeros_like(param) if beta1 is not None else None)
+        # Store shapes for factorization
+        self.param_shapes = [p.shape for p in params]
     
-    def _get_lr(self):
-        if self.lr is None:
-            if self.relative_step:
-                min_step = 1e-6 * self.step_count if self.warmup_init else 1e-2
-                return min(min_step, 1.0 / np.sqrt(self.step_count))
-            else:
-                return 1e-3
-        else:
+    def _get_lr(self, param_idx):
+        """Calculate the learning rate based on settings"""
+        if not self.relative_step:
+            # Use fixed learning rate
             return self.lr
             
-    def step(self, grads):
-        """Performs a single optimization step."""
-        self.step_count += 1
-        lr = self._get_lr()
+        # Compute relative step size with minimum
+        min_step = 1e-6 * self.step_count
+        if self.warmup_init:
+            lr = min(1.0, self.step_count / 10.0) * (0.1 / np.sqrt(min_step))
+        else:
+            lr = 1.0 / np.sqrt(min_step)
         
-        for param_idx, param in enumerate(self.params):
-            grad = grads[param_idx]
+        # Scale by parameter scale if enabled
+        if self.scale_parameter:
+            param = self.params[param_idx]
+            param_norm = np.sqrt(np.mean(np.square(param)) + self.eps1)
+            lr = min(lr, 1.0 / param_norm)
+        
+        # Apply minimum learning rate
+        return max(lr, self.eps2)
+    
+    def step(self, grads):
+        """Perform one optimization step"""
+        self.step_count += 1
+        
+        # Calculate beta2t (second moment decay rate) - stable calculation
+        beta2t = 1.0 - (self.step_count ** (-self.decay_rate))
+        beta2t = np.clip(beta2t, 0.0, 0.999)  # Clip for stability
+        
+        for param_idx, (param, grad) in enumerate(zip(self.params, grads)):
+            if param.size == 0:
+                continue
+                
+            # Get parameter shape
+            shape = self.param_shapes[param_idx]
             
-            if self.weight_decay != 0:
-                grad = grad + self.weight_decay * param
+            # Apply momentum (first moment) if beta1 > 0
+            if self.beta1 > 0.0:
+                if self.m[param_idx] is None:
+                    self.m[param_idx] = np.zeros_like(grad)
                 
-            # Handle factorization for 2D+ tensors
-            if self.factored[param_idx]:
-                # Get parameter shapes
-                shape = param.shape
-                grad_sqr = np.square(grad)
-                row_mean = grad_sqr.mean(axis=1)
-                col_mean = grad_sqr.mean(axis=0)
-                
-                # Update running averages of the factored second moment
-                decay_rate = 1.0 - np.power(self.step_count, self.decay_rate)
-                self.v_row[param_idx] = decay_rate * self.v_row[param_idx] + (1 - decay_rate) * row_mean
-                self.v_col[param_idx] = decay_rate * self.v_col[param_idx] + (1 - decay_rate) * col_mean
-                
-                # Calculate update using the factored second moment
-                row_factor = 1.0 / np.sqrt(self.v_row[param_idx] + self.eps[0])
-                col_factor = 1.0 / np.sqrt(self.v_col[param_idx] + self.eps[0])
-                
-                # Broadcast to match parameter shape
-                row_factor = row_factor.reshape(-1, 1)
-                update = grad * row_factor * col_factor
+                self.m[param_idx] = self.beta1 * self.m[param_idx] + (1.0 - self.beta1) * grad
+                grad_update = self.m[param_idx].copy()
             else:
-                # For non-factored params, update running average of second moment directly
-                decay_rate = 1.0 - np.power(self.step_count, self.decay_rate)
-                self.v[param_idx] = decay_rate * self.v[param_idx] + (1 - decay_rate) * np.square(grad)
+                grad_update = grad.copy()
+            
+            # Apply factorized second moment estimation
+            if len(shape) >= 2:
+                # For matrices and higher-dimensional tensors
                 
-                # Calculate update
-                update = grad / np.sqrt(self.v[param_idx] + self.eps[0])
-            
-            # Apply momentum if beta1 is specified
-            if self.beta1 is not None:
-                self.m[param_idx] = self.beta1 * self.m[param_idx] + (1 - self.beta1) * update
-                update = self.m[param_idx]
-            
-            # Apply clipping
-            update_norm = np.linalg.norm(update.flatten())
-            if update_norm > self.clip_threshold:
-                update = update * self.clip_threshold / update_norm
-            
-            # Scale update
-            if self.scale_parameter:
-                update = update * lr
+                # Reshape to 2D if needed (for tensors)
+                if len(shape) > 2:
+                    flat_shape = (shape[0], int(np.prod(shape[1:])))
+                    grad_2d = grad.reshape(flat_shape)
+                else:
+                    grad_2d = grad
+                
+                # Initialize row/column statistics if needed
+                if self.v_row[param_idx] is None:
+                    self.v_row[param_idx] = np.zeros(grad_2d.shape[0])
+                
+                if self.v_col[param_idx] is None:
+                    self.v_col[param_idx] = np.zeros(grad_2d.shape[1])
+                elif len(self.v_col[param_idx]) != grad_2d.shape[1]:
+                    # Reinitialize if shape mismatch
+                    self.v_col[param_idx] = np.zeros(grad_2d.shape[1])
+                    
+                # Calculate squared gradients
+                grad_sq = np.square(grad_2d)
+                
+                # Update row and column statistics
+                row_mean = np.mean(grad_sq, axis=1)
+                col_mean = np.mean(grad_sq, axis=0)
+                
+                # Update with EMA
+                self.v_row[param_idx] = beta2t * self.v_row[param_idx] + (1.0 - beta2t) * row_mean
+                self.v_col[param_idx] = beta2t * self.v_col[param_idx] + (1.0 - beta2t) * col_mean
+                
+                # Ensure non-negative values
+                self.v_row[param_idx] = np.maximum(self.v_row[param_idx], 0.0)
+                self.v_col[param_idx] = np.maximum(self.v_col[param_idx], 0.0)
+                
+                # Compute RMS values
+                row_rms = np.sqrt(self.v_row[param_idx] + self.eps1).reshape(-1, 1)
+                col_rms = np.sqrt(self.v_col[param_idx] + self.eps1).reshape(1, -1)
+                
+                # Compute normalization factor
+                row_mean_rms = np.sqrt(np.mean(self.v_row[param_idx]) + self.eps1)
+                
+                # Calculate scaling factor for update
+                scaling = (row_rms * col_rms) / np.maximum(row_mean_rms, 1e-5)
+                
+                # Reshape grad update if needed
+                if len(shape) > 2:
+                    update_2d = grad_update.reshape(flat_shape)
+                else:
+                    update_2d = grad_update
+                
+                # Scale the update
+                update_2d = update_2d / np.maximum(scaling, 1e-5)
+                
+                # Reshape back to original shape if needed
+                if len(shape) > 2:
+                    update = update_2d.reshape(shape)
+                else:
+                    update = update_2d
             else:
-                update = update * lr * np.maximum(np.sqrt(self.eps[1]), param_scale)
+                # For vectors (1D parameters)
+                if self.v_row[param_idx] is None:
+                    self.v_row[param_idx] = np.zeros_like(grad)
+                
+                # Update moment estimate
+                self.v_row[param_idx] = beta2t * self.v_row[param_idx] + (1.0 - beta2t) * np.square(grad)
+                
+                # Ensure non-negative
+                self.v_row[param_idx] = np.maximum(self.v_row[param_idx], 0.0)
+                
+                # Compute scaling
+                scaling = np.sqrt(self.v_row[param_idx] + self.eps1)
+                
+                # Scale the update
+                update = grad_update / np.maximum(scaling, 1e-5)
             
-            # Update parameter
-            param -= update
+            # Apply update clipping if threshold is set
+            if self.clip_threshold > 0.0:
+                # Compute update norm
+                update_norm = np.sqrt(np.sum(np.square(update)) + self.eps1)
+                
+                # Apply clipping if norm exceeds threshold
+                if update_norm > self.clip_threshold:
+                    update = update * (self.clip_threshold / update_norm)
+            
+            # Apply weight decay (decoupled)
+            lr = self._get_lr(param_idx)
+            if self.weight_decay > 0.0:
+                param = param * (1.0 - lr * self.weight_decay)
+            
+            # Apply final update
+            param -= lr * update
+            
+            # Final safety check for NaN/Inf values
+            if np.isnan(param).any() or np.isinf(param).any():
+                param = np.nan_to_num(param, nan=0.0, posinf=0.0, neginf=0.0)
     
     def zero_grad(self):
+        """Empty method to match PyTorch API"""
         pass
