@@ -10,7 +10,7 @@ os.environ['TORCH_CUDA_ARCH_LIST'] = 'Ampere'
 os.environ['MAX_JOBS'] = '10'
 # extra_compile_args['nvcc'] = ['-g', '-G']
 # Load the CUDA kernel as a python module
-minimal_attn = load(name='minimal_attn', sources=['fattn.cpp', 'flash.cu'], verbose=True, extra_cuda_cflags=['-O3'])
+minimal_attn = load(name='minimal_attn', sources=['fattn.cpp', 'flash.cu'], verbose=True, extra_cuda_cflags=['-O3', '-std=c++14'])
 torch.manual_seed(0)
 
 # set CUDA seeds
